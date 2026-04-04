@@ -1,5 +1,3 @@
-# vector
-
 ## 底层机制
 
 **`vector`本质是一个动态分配连续内存的数组**
@@ -85,7 +83,7 @@ C++STL设计是**左闭右开：[start, end)**
 >         if(*it == 2) v.earse(it);
 >         it++;
 >     }
->                 
+>                         
 >     // 正确写法
 >     while(it != v.end()) {
 >         if(*it == 2) it = v.earse(it);	// 删除了，erase已经帮你走了一步，接管新迭代器就好
