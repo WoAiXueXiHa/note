@@ -1,147 +1,474 @@
-## 0. 定义简单业务表
+# 数据类型
 
-所有字段必须有 `comment`，必须显式定义 `not null`，必须有明确的字符集 
+## 一、整数类型
+
+| 类型        | 字节  | 有符号范围               | 无符号范围       | 常见场景         |
+| ----------- | ----- | ------------------------ | ---------------- | ---------------- |
+| `tinyint`   | 1字节 | -128 ~ 127               | 0 ~ $2^{8} - 1$  | 状态、枚举小范围 |
+| `smallint`  | 2字节 | $-2^{15}$ ~ $2^{15} - 1$ | 0 ~ $2^{16} - 1$ | 小范围数量、等级 |
+| `mediumint` | 3字节 | $-2^{23}$ ~ $2^{23} - 1$ | 0 ~ $2^{24}-1$   | 少见             |
+| `int`       | 4字节 | -21亿 ~ 21亿             | 0 ~ 42亿         | 常规的id、计数   |
+| `bigint`    | 8字节 | 超级大                   | 超级大           | 用户id、订单id   |
+
+**`tinyint`最常见的**
 
 ```sql
-create table order_record (
-  id bigint unsigned not null auto_increment comment '主键id',
-  order_no varchar(32) not null comment '业务订单号',
-  user_id bigint unsigned not null comment '下单用户id',
-  order_type tinyint not null default 1 comment '订单类型: 1-普通, 2-促销',
-  total_amount decimal(10,2) not null default 0.00 comment '订单总金额',
-  remark text comment '订单备注',
-  create_time datetime not null default current_timestamp comment '创建时间',
-  primary key (id)
-) engine=innodb default charset=utf8mb4 comment='订单记录表';
+status tinyint unsigned not null default 0 comment '状态：0正常，1禁用，2删除';
 ```
 
-------
+适合：
 
-## 1. 核心数据类型：怎么选？为什么？
+* 用户状态
+* 订单状态
+* 性别
+* 是否删除
+* 小范围枚举
 
-### 1.1 整数类型 (integers)
+**`bigint`适合用户量极大，点击量极大的场景，数据量增长大，`int`很容易不够用，一次性开够**
 
-* **常用类型：** `tinyint` (1字节), `int` (4字节), `bigint` (8字节) 
-* **使用场景：** 
-  *  状态、类型字段（如：1-正常，0-禁用）统一用 `tinyint` 
-  * 主键 ID、用户 ID 统一用 `bigint` 
+适合：
 
-* **问题：** `int(11)` 后面的数字代表什么？
-  * **本质：** 那个数字只代表**显示宽度**，完全不影响存储大小或取值范围 如果不加 `zerofill` 属性，这个数字没有任何意义 
-* **实战经验：** 主键必须用 `bigint unsigned`，防止业务量大时 ID 耗尽 
+* 用户id
+* 订单id
+* 支付流水id
+* 消息id
 
-### 1.2 小数类型 (decimals)
+```sql
+user_id bigint unsigned not null comment '用户id'
+order_id bigint unsigned not null comment '订单id'
+```
 
-* **常用类型：** `decimal` (定点数), `float/double` (浮点数) 
-* **使用场景：*涉及金钱、资产、价格，必须用 `decimal` **
-* **问题：** 为什么钱不能用 `float` 或 `double`？
-  * **本质：** 浮点数在计算机底层是二进制近似表示，会产生**精度丢失**（比如 0.1 + 0.2 != 0.3） `decimal` 是以字符串形式存储的，能够保证绝对精确 
-* **语法：** `decimal(10,2)` 表示总长度10位，小数占2位 
+## 二、浮点类型和定点类型
 
-### 1.3 字符串类型 (strings)
+值得注意的是：**无符号类型的浮点和定点类型，直接砍掉负数部分，范围是0 ~ XX.XX**
 
-* **常用类型：** `varchar` (变长), `char` (定长), `text` (长文本) 
-* **使用场景：** 
-  *  长度不固定（如：用户名、订单号）用 `varchar` 
-  * 长度固定（如：密码、手机号）建议用 `char` 
-  * 超长描述内容用 `text` 
+### `float(m,d)`
 
-* **问题：** `varchar(n)` 里的 `n` 代表什么？
-  * **本质：** `n` 代表的是**字符数**而不是字节数 `varchar(64)` 能存 64 个汉字，也能存 64 个英文字母 
+* `m`：总位数
+* `d`：小数位数
 
-详细讲一下：`varchar(n)` 的底层空间计算法
+比如说：`float(5,2)`，总共五位数，小数点占两位，最大到`999.99`
 
-在 MySQL 引擎层面，`varchar(n)` 存入一条数据的实际硬盘开销公式如下：
+需要注意：`float`是浮点数，存在精度误差
 
-**实际占用空间 = 实际数据占用的字节数 + 记录长度的前缀开销 + (可选的 NULL 标识位)**
+###  `double`
 
-#### 实际数据占用的字节数 (受编码支配)
+`double`比`float`精度高，占8字节，但是依旧是浮点数，存在精度误差
 
-虽然定义的是 `varchar(n)`，意味着**最多**能存 `n` 个字符，但底层分配空间时，是根据**字符集编码（Charset）**来计算理论最大上限的：  
+适合：
 
-* **utf8 (utf8mb3):** 1 个字符最大 3 字节（中文 3，英文 1）  
-  * `varchar(10)` 最大占用：10 * 3 = 30 字节  
-* **utf8mb4:** 1 个字符最大 4 字节（支持 Emoji 4 ，中文 3，英文 1）  
-  * `varchar(10)` 最大占用：10 * 4 = 40 字节  
+* 科学计算
+* 统计估算
+* 经纬度
 
-**举个极端的例子：**
+###  `decimal`
 
-假设表编码是 `utf8mb4`，字段是 `varchar(10)`  
+`decimal`可以规避精度损失
 
-* 存入 `"helloworld"`（10个英文字母）：底层数据只占 10 字节  
-* 存入 `"一二三四五六七八九十"`（10个汉字）：底层数据占 30 字节  
-* 存入 10 个 🍄 (Emoji 表情)：底层数据占 40 字节  
+涉及到金融、电商、支付、金钱的业务，务必用`decimal`，要保证一分都不能出错
 
-####  长度前缀有“隐藏账单” (1 字节 vs 2 字节)
+```sql
+amout decimal(10, 2) not null default 0.00 comment '金额'
+```
 
-`varchar` 是变长字符串，MySQL 在读取磁盘时，必须得知道这串数据到底有多长  因此，MySQL 会在数据的开头隐式地加上一个**“长度前缀”**来记录这行数据的实际长度  
+* 总共10位
+* 小数精确到2位
+* 整数最多8位
+* 最大值约为`99999999.99`
 
-这个前缀占多少空间呢？取决于这行数据**可能的最大字节数**：
+常见的有：
 
-* 如果定义的最大字节数 **<= 255**，那么用 **1 个字节**就足够记录长度了（因为 $2^8 - 1 = 255$）  
-* 如果定义的最大字节数 **> 255**，那就需要用 **2 个字节**来记录（最大支持到 65535）  
+```sql
+price decimal(10,2) not null default 0.00 comment '商品价格'
+balance decimal(18,2) not null default 0.00 comment '账户余额'
+rate decimal(5,4) not null default 0.0000 comment '费率'
+```
 
-问：在 `utf8mb4` 编码下，`varchar(64)` 的长度前缀是 1 字节还是 2 字节？ 
+## 三、字符串类型
 
-答：因为 $64 \times 4 = 256$ 字节 $256 > 255$，所以必须使用 **2 字节**来存储长度前缀！如果把它优化成 `varchar(63)`，$63 \times 4 = 252$ 字节 $\le 255$，就能省下 1 个字节的长度前缀开销 
+###  `char(n)`
 
-### 1.4 日期与时间 (date & time)
+**固定长度字符串，给多少就开多少空间**
 
-#### datetime 的本质是“照相机”（存的是字面量）
+例如：
 
-* **底层逻辑：** `datetime` 就像是对着墙上的挂钟拍了一张照片，把 "2026-04-19 12:00:00" 这串数字硬生生地刻在了硬盘上 
-* **与时区无关：** 无论把这块硬盘带到北京（东八区）、还是带到纽约（西五区），你读出来的字面永远是 "2026-04-19 12:00:00" 
+```sql
+gender char(1) not null comment '性别：m男，f女'
+```
 
-####  timestamp 的本质是“计时器”（存的是秒数）
+适合：
 
-* **底层逻辑：** `timestamp` 并不存“年-月-日”，它存的是一个**整数（Integer）**——从 1970 年 1 月 1 日 0 点 0 分 0 秒（UTC 零时区）到现在，**一共滴答了多少秒** 
-* **随主机的时区千变万化：**
-  * **存入时（Insert）：** MySQL 会先看你当前系统处于什么时区，把你传进来的时间**换算成 UTC 零时区的秒数**，存入硬盘 
-  * **读取时（Select）：** MySQL 会把硬盘里那串秒数掏出来，再根据你当前查询客户端所在的时区，**反向换算**成当地时间展示给你 
-* **容量与代价：** 因为它本质是个 32 位整型数字，所以只占 **4 个字节** 
+* 固定长度的编码
+* 性别
+* 手机区号
 
-#### 著名的 2038 年问题（Y2K38 Bug）
+###  `varchar(n)`
 
-为什么 `timestamp` 只能存到 2038 年？
+**边长字符串，括号里的是字符数上限，实际用多少占用多少空间**
 
-因为 `timestamp` 底层是 4 个字节的带符号整数（Signed Int 32） 
+`n`是字符数，而不是字节数，底层会根据当前的字符集算出实际占用多少字节：
 
-这个整数的最大值是 $2^{31} - 1 = 2,147,483,647$ 
+* `utf8`占用3字节
+* `utf8mb4`占用4字节，支持emoji
 
-当时间来到 UTC 零时区的 **2038年1月19日凌晨 03:14:07** 时，从 1970 年开始计算的秒数刚好达到了 $2,147,483,647$ 
+`varchar`可以指定0~65535之间的值，但是有1 - 3字节用于记录数据大小，所以有效字节数是65532
 
-如果再往前走一秒，这个 32 位整数就会**溢出（变为负数）**，导致数据库时间瞬间穿越回 1901 年或直接报错 
+编码是`utf8`时，`n`的最大值是$65532 \div 3 = 21844$，所以最多只能存21844个字符
 
-------
+适合：
 
-## 2. 核心约束 (constraints)：数据的护城河
+* 用户名
+* 昵称
+* 邮箱
+* 标题
+* 地址
+* URL
 
-### 2.1 主键约束 (primary key)
+例如：
 
-* **本质：** 唯一且不能为空 一张表必须且只能有一个 
-* **使用：** 必须使用自增 `bigint` 作为主键，不要用业务字段（如订单号）做主键 
+```sql
+username varchar(64) not null comment '用户名'
+email varchar(128) default null comment '邮箱'
+nickname varchar(64) not null default '' comment '昵称'
+title varchar(255) not null comment '标题'
+```
 
-### 2.2 非空约束 (not null)
+###  `text`大文本
 
-* **本质：** 该字段必须有值 
-* **使用：** **除非特殊理由，否则所有字段都定义为 `not null` **
-* **问题：** 为什么不建议字段允许为 `null`？
-  * **本质：** `null` 值会占用额外的存储空间，且在程序里容易引发空指针异常
+见类型：
 
-### 2.3 默认值约束 (default)
+| 类型         | 最大长度 | 场景                 |
+| :----------- | -------: | :------------------- |
+| `tinytext`   | 255 字节 | 很短文本             |
+| `text`       |     64KB | 文章内容、描述       |
+| `mediumtext` |     16MB | 长文章               |
+| `longtext`   |      4GB | 超长文本，很少直接用 |
 
-* **本质：** 插入数据时如果不给这个字段赋值，自动填入默认值 
-* **使用：** 配合 `not null` 使用 状态字段给默认值 `1`，创建时间给 `current_timestamp` 
+例如：
 
-### 2.4 唯一约束 (unique)
+```sql
+content text comment '文章内容'
+description text comment '商品描述'
+```
 
-* **本质：** 保证该字段在全表不重复（但可以有多个 `null`） 
-* **使用场景：** 登录名、手机号、业务订单号 
-* **写法：** `unique key 约束名 (字段)` 
+需要注意：**大字段尽量不要和高频查询字段放在同一张表中**
 
-### 2.5 自增约束 (auto_increment)
+* 大字段会影响缓存命中
+* 这样可以减少IO，提高效率
 
-* **本质：** 自动分配下一个数字 
+##  四、日期时间类型
 
-done~
+###  `date`
 
+```sql
+birthday data default null comment '生日'
+```
+
+适合：
+
+* 生日
+* 日期
+* 统计日期
+* 入职日期
+
+格式：`YYYY-MM-DD`，占用3字节
+
+###  `time`
+
+```sql
+duration time comment '时长'
+```
+
+格式：`HH:MM:SS`
+
+适合：
+
+* 时间间隔
+* 当天时间点
+* 持续时间
+
+存**耗时**使用整数秒/毫秒：
+
+```sql
+duration_ms int unsigned not null default 0 comment '耗时毫秒'
+```
+
+###  `datetime`
+
+占用8字节，适合：
+
+* 创建时间
+* 更新时间
+* 业务发生时间
+* 订单时间
+
+范围很大：`1000-01-01 ~ 9999-12-31`
+
+不受时区转换影响，这个底层逻辑是，把这个时间**刻在硬盘上**，硬盘带到哪个时区，读出来的时间永远不变
+
+###  `timestamp`
+
+本质是一个时间戳，不存年月日，存的是一个**整数**，从 1970 年 1 月 1 日 0 点 0 分 0 秒（UTC 零时区）到现在，**一共过了多少秒**
+
+会随主机的时区变化：
+
+* 存入：MySQL会先看当前系统处于什么时区，把传进来的时间**换算成时间戳**，存入硬盘
+* 读取：MySQL把硬盘那串时间戳秒数逃出来，再根据查询的客户端所在时区，**换算**成当地时间展示
+
+**`timestamp`只能存到2038年**
+
+`timestamp`底层是一个4字节的带符号整数，最大值$2^{31} - 1 = 2147483647$，时间到了**2038年1月19日凌晨 03:14:07**时，从1970年开始算的秒数刚好是$2147483647$，再往后走一秒，溢出了
+
+
+
+##  五、`enum`和`set`
+
+### `enum`枚举，多选一
+
+```sql
+gender enum('male', 'female', 'unknown') not null default 'unknown'
+```
+
+内部是索引：
+
+```text
+male -> 1
+female -> 2
+unknown -> 3
+```
+
+可以这样查询：
+
+```sql
+select * from user where gender = 'male'
+```
+
+查看某个枚举值：
+
+```sql
+select * from user where gender = 'male'
+```
+
+查询某个字段是否等于几个枚举值：
+
+```sql
+select * from user where gender in ('male', 'unknown')
+```
+
+**`enum`存在以下问题：**
+
+* 新增枚举值就需要改变表结构
+* 跨语言、跨服务维护成本高
+
+### `set`不定项选择，类似位图
+
+```sql
+hobby set('music', 'sport', 'game', 'read')
+```
+
+底层类似位图，查询可以：
+
+```sql
+select * from user where find_in_set('music', hobby)
+# 或者是
+select * from user where hobby & 1
+```
+
+# 约束
+
+##  非空约束
+
+`not null` 约束用户必须插入一个值
+
+```sql
+username varchar(64) not null commnet '用户名'
+status tinyint unsigned not null default 0 comment '状态'
+created_at datetime not null default current_timestamp commnet '创建时间'
+```
+
+`null`不参与运算，代表没有，而不是空值，空值是 **` `**
+
+## 缺省值
+
+`default`的使用：
+
+* 当用户忽略这一列时，用这个缺省值
+* 没有缺省值且约束了`not null`，忽略这一列会报错
+
+使用中，建议：
+
+数字：
+
+```sql
+conut int unsigned not null default 0
+```
+
+字符串：
+
+```sql
+nickname varchar(64) not null default ''
+```
+
+状态：
+
+```sql
+status tinyint unsigned not null default 0
+```
+
+时间：
+
+```sql
+created_at datetime not null default current_timestamp
+```
+
+## 注释
+
+`comment`是写给程序员的，协作开发一定要写注释
+
+## 主键约束
+
+一张表最多一个主键，但是主键可以由多列组成，变成复合主键
+
+### 单列主键
+
+```sql
+id bigint unsigned not null primary key comment '主键id'
+```
+
+要求：
+
+* 唯一
+* 非空
+* 不要频繁修改
+
+主键为什么通常使用整数？
+
+* 整数比字符串省空间
+* 整数查找比字符串块
+* 自增主键插入顺序友好
+
+### 自增主键
+
+```sql
+id bigint unsigned not null auto_increment primary key
+```
+
+
+
+`auto_increment`对应的字段不给值，会自动被系统触发，系统会从当前字段中已经有的最大值+1，得到一个新的不同的值，搭配主键使用
+
+特点：
+
+* 自增长字段是整数
+* 一张表最多只能有一个自增长
+* 任何字段做自增长，必须是一个索引
+
+### 复合主键
+
+多种列属性是强绑定的，比如课程名称和课程号是一一对应的，那么就可以设置成复合主键
+
+以下的案例是，一个学生不能重复选一门课程
+
+```sql
+create table student_course(
+	student_id bigint unsigned not null,
+    course_id bigint unsigned not null,
+    score int default null,
+    primary key (student_id, course_id)
+)
+```
+
+## 唯一键
+
+**主键标识行唯一，唯一键保证业务字段不重复**
+
+比如说有个手机号，身份证号，这些都得保证每个人的属性都是不同的，不能重复
+
+```sql
+phone varchar(20) not null unique comment '手机号'
+```
+
+唯一键可以有多个`null`，因为`null`不参与运算，不计数
+
+## 外键
+
+**保证两张表之间的数据关系不能乱**
+
+举个例子：用户表和订单表
+
+一个用户可以有多个订单，所以用户表是父表，订单表是子表
+
+用户`users`：
+
+```sql
+create table users (
+	id bigint primary key,
+    name varchar(64)
+);
+```
+
+订单表`orders`:
+
+```sql
+create table orders(
+	id bigint primary key,
+    user_id bigint,
+    amount decimal(10,2),
+    foreign key (user_id) references users(id)
+);
+```
+
+`foreign key (user_id) references users(id)`这一行规定了，`order.user_id`的值必须在`users.id`里面存在
+
+插入两个真实用户：
+
+```sql
+mysql> insert into users values(1, 'kunkun');
+Query OK, 1 row affected (0.10 sec)
+
+mysql> insert into users values(2, 'lele');
+Query OK, 1 row affected (0.01 sec)
+```
+
+插入合法订单：
+
+```sql
+mysql> insert into orders values (101, 1, 99.50);
+Query OK, 1 row affected (0.03 sec)
+
+mysql> insert into orders values (102, 2, 110);
+Query OK, 1 row affected (0.02 sec)
+```
+
+**插入不存在的用户，会报错：**
+
+```sql
+mysql> insert into orders values (12, 3, 120);
+ERROR 1452 (23000): Cannot add or update a child row: a foreign key constraint fails 
+```
+
+子表`orders`想插入`user_id = 3`，但是父表中`users`不存在这个id，拦截
+
+**外键不允许子表引用不存在的父表数据**
+
+**修改订单归属，会报错：**
+
+```sql
+mysql> update orders set user_id = 888 where id = 101;
+ERROR 1452 (23000): Cannot add or update a child row: a foreign key constraint fails
+```
+
+**外键不允许子表把引用改成不存在的父表数据**
+
+**删除被引用的用户，会报错**
+
+```sql
+mysql> delete from users where id = 1;
+ERROR 1451 (23000): Cannot delete or update a parent row: a foreign key constraint fails
+```
+
+**外键不允许父表删除仍被子表引用的数据**->得先把数据删干净
+
+总结一下外键的作用：
+
+子表里引用父表的值，必须真实存在，不能乱改，不能断关系
